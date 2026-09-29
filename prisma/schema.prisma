@@ -1,0 +1,219 @@
+// CodeRoom database schema.
+// Phase map: User (1), Room/RoomMember/Problem (2), Message (4), Interview/
+// CodeSnapshot (5), TestCase/Submission (6), CodeEvent (9).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String   @id @default(cuid())
+  name         String
+  email        String   @unique
+  passwordHash String
+  image        String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  hostedRooms     Room[]         @relation("RoomHost")
+  memberships     RoomMember[]
+  messages        Message[]
+  submissions     Submission[]
+  interviewsGiven Interview[]    @relation("Interviewer")
+  interviewsTaken Interview[]    @relation("Candidate")
+  codeSnapshots   CodeSnapshot[]
+
+  @@map("users")
+}
+
+// ---------- Phase 2: Rooms ----------
+
+enum RoomStatus {
+  ACTIVE
+  COMPLETED
+
+  @@map("room_status")
+}
+
+enum RoomVisibility {
+  PUBLIC
+  PRIVATE
+
+  @@map("room_visibility")
+}
+
+enum RoomRole {
+  HOST
+  MEMBER
+
+  @@map("room_role")
+}
+
+enum ProblemDifficulty {
+  EASY
+  MEDIUM
+  HARD
+
+  @@map("problem_difficulty")
+}
+
+model Room {
+  id          String         @id @default(cuid())
+  name        String
+  joinCode    String         @unique // 6 chars, unambiguous alphabet (no 0/O/1/I)
+  language    String         @default("javascript")
+  status      RoomStatus     @default(ACTIVE)
+  visibility  RoomVisibility @default(PRIVATE)
+  code        String         @default("") // shared editor content, synced live in Phase 4
+  hostId      String
+  host        User           @relation("RoomHost", fields: [hostId], references: [id])
+  problemId   String?
+  problem     Problem?       @relation(fields: [problemId], references: [id])
+  members     RoomMember[]
+  messages    Message[]
+  interviews  Interview[]
+  submissions Submission[]
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+  endedAt     DateTime?
+
+  @@map("rooms")
+}
+
+model RoomMember {
+  id       String   @id @default(cuid())
+  roomId   String
+  room     Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  userId   String
+  user     User     @relation(fields: [userId], references: [id])
+  role     RoomRole @default(MEMBER)
+  joinedAt DateTime @default(now())
+
+  @@unique([roomId, userId])
+  @@index([userId])
+  @@map("room_members")
+}
+
+model Problem {
+  id          String            @id @default(cuid())
+  slug        String            @unique
+  title       String
+  difficulty  ProblemDifficulty @default(EASY)
+  description String
+  examples    Json? // [{ input, output, explanation? }]
+  constraints String[]
+  starterCode Json // { javascript, python, java, cpp }
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  rooms      Room[]
+  interviews Interview[]
+  testCases  TestCase[]
+
+  @@map("problems")
+}
+
+// ---------- Phase 6: Code execution ----------
+
+model TestCase {
+  id             String   @id @default(cuid())
+  problemId      String
+  problem        Problem  @relation(fields: [problemId], references: [id], onDelete: Cascade)
+  input          String
+  expectedOutput String
+  isSample       Boolean  @default(false) // sample = Run; hidden = Submit
+  weight         Int      @default(1)
+  createdAt      DateTime @default(now())
+
+  @@index([problemId, isSample])
+  @@map("test_cases")
+}
+
+model Submission {
+  id        String   @id @default(cuid())
+  roomId    String
+  room      Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  problemId String?
+  language  String
+  code      String
+  verdict   String // ACCEPTED | WRONG_ANSWER | RUNTIME_ERROR | TLE | COMPILE_ERROR | INTERNAL_ERROR
+  passed    Int
+  total     Int
+  runtimeMs Int?
+  stdout    String?
+  stderr    String?
+  results   Json // per-test: [{ index, passed, input, expected, actual, stderr }]
+  createdAt DateTime @default(now())
+
+  @@index([roomId, createdAt])
+  @@map("submissions")
+}
+
+// ---------- Phase 4: Real-time chat ----------
+
+model Message {
+  id        String   @id @default(cuid())
+  roomId    String
+  room      Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  content   String
+  createdAt DateTime @default(now())
+
+  @@index([roomId, createdAt])
+  @@map("messages")
+}
+
+// ---------- Phase 5: Interview mode + history ----------
+
+enum InterviewStatus {
+  ACTIVE
+  COMPLETED
+
+  @@map("interview_status")
+}
+
+model Interview {
+  id            String          @id @default(cuid())
+  roomId        String
+  room          Room            @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  interviewerId String
+  interviewer   User            @relation("Interviewer", fields: [interviewerId], references: [id])
+  candidateId   String
+  candidate     User            @relation("Candidate", fields: [candidateId], references: [id])
+  problemId     String?
+  problem       Problem?        @relation(fields: [problemId], references: [id])
+  status        InterviewStatus @default(ACTIVE)
+  startedAt     DateTime        @default(now())
+  endedAt       DateTime?
+  rating        Int? // candidate self/host rating 1–5
+  feedback      String?
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+  snapshots     CodeSnapshot[]
+
+  @@index([interviewerId, startedAt])
+  @@index([candidateId, startedAt])
+  @@map("interviews")
+}
+
+model CodeSnapshot {
+  id          String    @id @default(cuid())
+  interviewId String
+  interview   Interview @relation(fields: [interviewId], references: [id], onDelete: Cascade)
+  userId      String
+  user        User      @relation(fields: [userId], references: [id])
+  code        String
+  language    String
+  takenAt     DateTime  @default(now())
+
+  @@index([interviewId, takenAt])
+  @@map("code_snapshots")
+}
