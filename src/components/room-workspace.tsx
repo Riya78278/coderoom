@@ -295,6 +295,13 @@ export function RoomWorkspace({
 
   // Live submission results from other participants.
   const lastSubSeqRef = useRef(0);
+  // Auto-scroll down to the results panel when a run/submit produces output
+  // (results render at the bottom so the editor never shifts).
+  const resultsRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (execState.kind === "idle") return;
+    resultsRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+  }, [execState]);
   useEffect(() => {
     if (!submissionEvent || submissionEvent.seq <= lastSubSeqRef.current) return;
     lastSubSeqRef.current = submissionEvent.seq;
@@ -465,10 +472,12 @@ export function RoomWorkspace({
 
       {/* Results render at the BOTTOM so appearing results never shift the
           editor down (CLS). The panels row above shrinks instead. */}
-      <OutputPanel
-        state={execState}
-        onClose={() => setExecState({ kind: "idle" })}
-      />
+      <div ref={resultsRef}>
+        <OutputPanel
+          state={execState}
+          onClose={() => setExecState({ kind: "idle" })}
+        />
+      </div>
 
       <p className="border-t border-white/10 bg-navy-950 px-4 py-1.5 text-center text-[11px] text-slate-500 lg:hidden">
         Best on a wider screen — problem and chat panels appear on large viewports.
