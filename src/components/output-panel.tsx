@@ -16,7 +16,7 @@ export type CaseResultView = {
 export type ExecState =
   | { kind: "idle" }
   | { kind: "running"; mode: "run" | "submit" }
-  | { kind: "done"; mode: "run" | "submit"; verdict: string; passed: number; total: number; runtimeMs: number; results: CaseResultView[]; stderr: string }
+  | { kind: "done"; mode: "run" | "submit"; verdict: string; passed: number; total: number; runtimeMs: number; results: CaseResultView[]; stderr: string; liveFromOther?: boolean }
   | { kind: "error"; message: string };
 
 const VERDICT_STYLES: Record<string, { label: string; cls: string }> = {
@@ -96,6 +96,9 @@ export function OutputPanel({
               >
                 {VERDICT_STYLES[state.verdict]?.label ?? state.verdict}
               </span>
+              {state.liveFromOther && (
+                <span className="badge bg-sky-500/15 text-sky-300">live · teammate</span>
+              )}
               <span className="text-xs text-slate-400">
                 {state.passed}/{state.total} passed · {state.runtimeMs} ms
               </span>

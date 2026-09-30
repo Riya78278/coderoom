@@ -2,7 +2,7 @@
 
 > A real-time collaborative coding platform where two or more people join the same room, solve a problem together, chat, and see each other's code and cursors change live — built for mock interviews and pair programming.
 
-**Status: ✅ Phases 1–6 complete — code execution + grading verified (24/24 tests). Next: Phase 7 (deployment).**
+**Status: ✅ Phases 1–7 complete — deployed live and verified (24/24 tests against production). Next: Phase 9 (code replay, mandatory).**
 
 **Scope: 12 phases — 10 mandatory for the complete product (0–7, 9, 11), 2 optional (8: AI interviewer, 10: notifications).**
 
@@ -268,14 +268,17 @@ Each phase ends with something demoable. Checkboxes track progress.
 
 **Done when:** Run shows sample-test output, Submit grades hidden tests, and results persist and display for all participants. *(Verified by `node scripts/test-phase6.mjs`: 24/24 — guest/non-member rejection, run-uses-3-samples-only, submit grades all 5 and persists, correct solution ACCEPTED, wrong answer on hidden case with inputs masked, runtime error surfaced, infinite loop → TLE, newest-first history, and live `submission:result` received by a second room member.)*
 
-### ⬜ Phase 7 — Deployment
+### ✅ Phase 7 — Deployment *(live — 24/24 tests passed against production)*
 **Goal:** one public URL to share.
 
-1. Push to GitHub.
-2. Render web service from the repo; env vars: `DATABASE_URL`, `AUTH_SECRET`, `NEXTAUTH_URL`/`AUTH_URL`, `PORT`.
-3. Neon stays the database (free, no expiry — Render's own free DB expires after 30 days, hence the split).
-4. Result: `https://coderoom-xxxx.onrender.com`.
-5. Free-tier caveat: server sleeps after 15 min idle (~30–60 s cold start); optional UptimeRobot keep-alive ping while actively sharing.
+**Deployed:** https://coderoom-7s7u.onrender.com (full guide: `DEPLOY.md`)
+
+1. Code pushed to GitHub (private repo); Render web service deploys every push.
+2. Build: `npm install && npx prisma generate && npx prisma migrate deploy && npm run build`; Start: `npm start` (the custom `server.mjs` — WebSockets require it, which rules out Vercel).
+3. Env vars: `DATABASE_URL` (Neon **pooled** string — Neon stays the DB, free, no expiry), `AUTH_SECRET`, `INTERNAL_BROADCAST_SECRET`, `NODE_VERSION=22`.
+4. Free-tier caveat: server sleeps after ~15 min idle (~30–60 s cold start); optional UptimeRobot keep-alive ping while actively sharing.
+
+**Done when:** the public URL serves the full app. *(Verified: the complete Phase 6 suite ran green against the live URL — register, create room, run/submit grading, hidden-test masking, TLE, persistence, and the live WebSocket `submission:result` broadcast between two members.)*
 
 ### ⬜ Phase 9 — Code Replay *(mandatory)*
 **Goal:** scrub through any finished session and watch the solution being written, decision by decision.

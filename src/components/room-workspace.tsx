@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { CodeEditor } from "@/components/code-editor";
 import { ProblemPanel } from "@/components/problem-panel";
+import { ProblemPicker } from "@/components/problem-picker";
 import { ChatPanel } from "@/components/chat-panel";
 import { PresenceBar } from "@/components/presence-bar";
 import { CopyJoinCode } from "@/components/copy-join-code";
@@ -81,7 +82,7 @@ const LANG_EXT: Record<string, string> = {
 
 export function RoomWorkspace({
   room,
-  problem,
+  problem: initialProblem,
   members,
   me,
   activeInterview,
@@ -99,6 +100,7 @@ export function RoomWorkspace({
     me: socketMe,
     interviewEvent,
     submissionEvent,
+    roomEvent,
     sendCodeChange,
     sendCursorChange,
     sendLanguageChange,
@@ -111,6 +113,8 @@ export function RoomWorkspace({
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [execState, setExecState] = useState<ExecState>({ kind: "idle" });
   const [execBusy, setExecBusy] = useState(false);
+  // The problem is live-updatable (host can assign one mid-session).
+  const [problem, setProblem] = useState<WorkspaceProblem>(initialProblem);
 
   const myUserId = socketMe?.userId ?? me.id;
   const applyingRemoteRef = useRef(false);
@@ -253,6 +257,39 @@ export function RoomWorkspace({
     }
   }
 
+  // Live problem switch (host picked a new problem → room:update broadcast).
+  // Everyone swaps to the new problem's starter code; the full statement is
+  // fetched so the left panel shows it.
+  const lastRoomSeqRef = useRef(0);
+  useEffect(() => {
+    if (!roomEvent || roomEvent.seq <= lastRoomSeqRef.current) return;
+    lastRoomSeqRef.current = roomEvent.seq;
+    if (!roomEvent.problem) {
+      setProblem(null);
+      return;
+    }
+    const slug = roomEvent.problem.slug;
+    const starter = starterCodeFor(slug, language);
+    setProblem((prev) => ({
+      id: roomEvent.problem!.id,
+      slug,
+      title: roomEvent.problem!.title,
+      difficulty: roomEvent.problem!.difficulty,
+      description: prev?.description ?? "",
+      examples: prev?.examples ?? [],
+      constraints: prev?.constraints ?? [],
+    }));
+    setCode(starter);
+    sendCodeChange(starter);
+    fetch(`/api/rooms/${room.id}/problem`, { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (d?.problem) setProblem(d.problem);
+      })
+      .catch(() => undefined);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [roomEvent]);
+
   // Live submission results from other participants.
   const lastSubSeqRef = useRef(0);
   useEffect(() => {
@@ -260,16 +297,16 @@ export function RoomWorkspace({
     lastSubSeqRef.current = submissionEvent.seq;
     if (submissionEvent.userId === myUserId) return; // my own result already shown
     setExecState({
-      kind: "done",
-      mode: "submit",
-      verdict: submissionEvent.verdict,
-      passed: submissionEvent.passed,
-      total: submissionEvent.total,
-      runtimeMs: submissionEvent.runtimeMs ?? 0,
-      results: [],
-      stderr: `Live result — ${submissionEvent.name} submitted`,
-      liveFromOther: true,
-    } as ExecState);
+        kind: "done",
+        mode: "submit",
+        verdict: submissionEvent.verdict,
+        passed: submissionEvent.passed,
+        total: submissionEvent.total,
+        runtimeMs: submissionEvent.runtimeMs ?? 0,
+        results: [],
+        stderr: `Live result — ${submissionEvent.name} submitted (${submissionEvent.passed}/${submissionEvent.total} passed)`,
+        liveFromOther: true,
+      });
   }, [submissionEvent, myUserId]);
 
   async function handleChatSend(content: string): Promise<boolean> {
@@ -312,6 +349,14 @@ export function RoomWorkspace({
               <PresenceBar presence={presence} myUserId={myUserId} />
             </div>
           </div>
+        </div>
+        <div className="mx-2 flex min-w-0 flex-1 justify-center">
+          <ProblemPicker
+            roomId={room.id}
+            isHost={me.role === "HOST"}
+            current={problem ? { id: problem.id, slug: problem.slug, title: problem.title, difficulty: problem.difficulty } : null}
+            roomEvent={roomEvent}
+          />
         </div>
         <div className="flex shrink-0 items-center gap-2">
           <select

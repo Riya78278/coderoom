@@ -47,6 +47,38 @@ export function InterviewPanel({
   const [elapsed, setElapsed] = useState(0);
   const [notice, setNotice] = useState<string | null>(null);
 
+  // Members refresh live while the start dialog is open, so someone who joins
+  // right before the host clicks "Start interview…" appears without a reload.
+  const [liveMembers, setLiveMembers] = useState(members);
+  useEffect(() => setLiveMembers(members), [members]);
+  useEffect(() => {
+    if (dialog !== "start") return;
+    let cancelled = false;
+    const tick = () => {
+      fetch(`/api/rooms/${roomId}`, { cache: "no-store" })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d) => {
+          if (cancelled || !d?.room?.members) return;
+          setLiveMembers(
+            d.room.members.map(
+              (m: { role: string; user: { id: string; name: string } }) => ({
+                userId: m.user.id,
+                name: m.user.name,
+                role: m.role,
+              })
+            )
+          );
+        })
+        .catch(() => undefined);
+    };
+    tick();
+    const t = setInterval(tick, 3000);
+    return () => {
+      cancelled = true;
+      clearInterval(t);
+    };
+  }, [dialog, roomId]);
+
   const refetch = useCallback(() => {
     fetch(`/api/rooms/${roomId}/interview`, { cache: "no-store" })
       .then((r) => (r.ok ? r.json() : null))
@@ -90,7 +122,7 @@ export function InterviewPanel({
   }, [interview]);
 
   const candidateName =
-    members.find((m) => m.userId === interview?.candidateId)?.name ??
+    liveMembers.find((m) => m.userId === interview?.candidateId)?.name ??
     "Selected member";
 
   async function start(candidateId: string) {
@@ -162,10 +194,21 @@ export function InterviewPanel({
     );
   }
 
-  if (!isHost) return null;
+  // Non-hosts see a collaboration bar (instead of nothing) so a plain
+  // two-person session feels alive, and live notices reach everyone.
+  if (!isHost) {
+    return (
+      <div className="border-b border-white/10 bg-navy-800 px-4 py-2">
+        <span className="text-xs text-slate-400">
+          Collaboration mode — the host can start a timed interview session anytime.
+        </span>
+        {notice && <span className="ml-3 text-[11px] text-amber-300">{notice}</span>}
+      </div>
+    );
+  }
 
   if (dialog === "start") {
-    const candidates = members.filter((m) => m.role !== "HOST");
+    const candidates = liveMembers.filter((m) => m.role !== "HOST");
     return (
       <div className="border-b border-white/10 bg-navy-800 px-4 py-3">
         <p className="text-xs font-semibold text-slate-200">Start an interview session</p>
@@ -190,9 +233,9 @@ export function InterviewPanel({
             Cancel
           </button>
         </div>
-        {members.length < 2 && (
+        {liveMembers.length < 2 && (
           <p className="mt-2 text-[11px] text-amber-300">
-            You need another member in the room to run an interview — share the join code.
+            Waiting for another member to join — share the join code. This list updates live.
           </p>
         )}
       </div>

@@ -76,6 +76,17 @@ export function useRoomSocket(roomId: string) {
     at: string;
     seq: number;
   } | null>(null);
+  const [roomEvent, setRoomEvent] = useState<{
+    kind: "problem-changed";
+    problem: {
+      id: string;
+      slug: string;
+      title: string;
+      difficulty: string;
+    } | null;
+    by: string;
+    seq: number;
+  } | null>(null);
 
   const socketRef = useRef<Socket | null>(null);
   const seqRef = useRef(0);
@@ -147,6 +158,12 @@ export function useRoomSocket(roomId: string) {
     socket.on("submission:result", (p: { submissionId: string; userId: string; name: string; verdict: string; passed: number; total: number; runtimeMs: number | null; at: string }) => {
       seqRef.current += 1;
       setSubmissionEvent({ ...p, seq: seqRef.current });
+    });
+
+    socket.on("room:update", (p: { kind: string; problem: { id: string; slug: string; title: string; difficulty: string } | null; by: string }) => {
+      if (p.kind !== "problem-changed") return;
+      seqRef.current += 1;
+      setRoomEvent({ ...p, kind: "problem-changed", seq: seqRef.current });
     });
 
     socket.on("typing", (p: { userId: string; name: string; typing: boolean }) => {
@@ -226,6 +243,7 @@ export function useRoomSocket(roomId: string) {
     me,
     interviewEvent,
     submissionEvent,
+    roomEvent,
     sendCodeChange,
     sendCursorChange,
     sendLanguageChange,

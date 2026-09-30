@@ -3,6 +3,7 @@ import { z } from "zod";
 import { db } from "@/lib/db";
 import { getSessionUser } from "@/lib/session";
 import { gradeSubmission } from "@/lib/execution/run";
+import { emitToRoom } from "@/lib/realtime-emit";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -120,19 +121,10 @@ export async function POST(request: Request, { params }: RouteContext) {
         runtimeMs: grade.runtimeMs,
         at: new Date().toISOString(),
       };
-      const ioServer = (
-        globalThis as {
-          __coderoomIO?: {
-            to: (room: string) => {
-              emit: (event: string, payload: unknown) => boolean;
-            };
-          };
-        }
-      ).__coderoomIO;
-      if (ioServer?.to) {
-        const sent = ioServer.to(room.id).emit("submission:result", broadcastPayload);
+      const delivered = emitToRoom(room.id, "submission:result", broadcastPayload);
+      if (delivered) {
         console.log(
-          `[execute] broadcast submission:result → room ${room.id} (delivered: ${sent})`
+          `[execute] broadcast submission:result → room ${room.id} (delivered: true)`
         );
       } else if (BROADCAST_SECRET) {
         try {
