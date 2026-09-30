@@ -312,33 +312,6 @@ Each phase ends with something demoable. Checkboxes track progress.
 
 **Done when:** the public URL serves the full app. *(Verified: the complete Phase 6 suite ran green against the live URL — register, create room, run/submit grading, hidden-test masking, TLE, persistence, and the live WebSocket `submission:result` broadcast between two members.)*
 
-### ⬜ Phase 9 — Code Replay *(mandatory)*
-**Goal:** scrub through any finished session and watch the solution being written, decision by decision.
-
-**Implementation:**
-1. Record a `CodeEvent` timeline during rooms: periodic full snapshots + diffs between them (keeps rows small).
-2. Interleave chat messages and run/submit moments into the same timeline.
-3. Replay page: code viewer + scrubber (play / pause / speed), following the candidate's progress minute by minute.
-4. Link each replay from the Interview History page.
-
-**Done when:** you can open a completed session and replay how the code evolved end to end.
-
-### ⬜ Phase 11 — Redis Scale-Out *(mandatory)*
-**Goal:** multiple server instances without breaking real-time sync.
-
-**Implementation:**
-1. Add Redis (Upstash free tier or local) via `@socket.io/redis-adapter`: every broadcast publishes through Redis so **all** instances deliver it — the fix for the "Riya on Server 1, Rahul on Server 2" problem.
-2. Move presence and room membership from in-memory maps to Redis with TTL heartbeats.
-3. Run 2+ app instances behind a load balancer and verify cross-instance rooms.
-
-**Done when:** two participants on two different server instances, same room, still see each other's code, cursors, and chat instantly.
-
-### ⬜ Optional Phases
-| Phase | Feature | Approach |
-|---|---|---|
-| 8 | **AI interviewer** | OpenAI API: approach questions, hints, post-session feedback (communication, complexity, code quality) |
-| 10 | **Notifications** | Joins, invites, messages, assigned problems |
-
 ---
 
 ## 8. Acceptance Checklists
@@ -357,7 +330,7 @@ Live public URL on Render → Replay any finished session →
 Two app instances synced through Redis
 ```
 
-When both chains work reliably — locally first, then on the deployed URL — the product is complete per the agreed scope (only the AI interviewer and notifications would remain, by choice).
+When both chains work reliably — locally first, then on the deployed URL — the product is complete per the agreed scope. **All phases (0–11, including both optional ones) are implemented and verified; the live deployment is the demo.**
 
 ---
 

@@ -170,6 +170,12 @@ export function InterviewPanel({
     }
   }
 
+  // End & review form must render BEFORE the active-interview banner —
+  // the banner was swallowing it, making the End button appear dead.
+  if (dialog === "end" && interview) {
+    return <EndForm busy={busy} onEnd={end} onCancel={() => setDialog(null)} />;
+  }
+
   if (interview) {
     return (
       <div className="flex items-center justify-between gap-3 border-b border-indigo-400/20 bg-indigo-500/10 px-4 py-2">

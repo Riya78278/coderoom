@@ -3,6 +3,7 @@ import { z } from "zod";
 import { db } from "@/lib/db";
 import { getSessionUser } from "@/lib/session";
 import { aiEnabled, chatCompletion } from "@/lib/ai/openai";
+import { offlineHintFor } from "@/lib/ai/offline-hints";
 
 const hintSchema = z.object({
   roomId: z.string().cuid(),
@@ -36,24 +37,27 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Room not found." }, { status: 404 });
     }
 
-    // Feature-availability check comes AFTER auth+membership so unauthorized
-    // callers can't probe configuration state.
-    if (!aiEnabled()) {
-      return NextResponse.json(
-        { error: "AI is not configured on this server (missing OPENAI_API_KEY)." },
-        { status: 503 }
-      );
-    }
-
     const room = await db.room.findUnique({
       where: { id: roomId },
       select: {
         code: true,
-        problem: { select: { title: true, description: true } },
+        language: true,
+        problem: { select: { title: true, description: true, slug: true } },
       },
     });
     if (!room) {
       return NextResponse.json({ error: "Room not found." }, { status: 404 });
+    }
+
+    // No API key → offline "smart coach": per-problem hint ladders picked by
+    // the candidate's actual code progress. Always available, zero cost.
+    if (!aiEnabled()) {
+      const hint = offlineHintFor(
+        room.problem?.slug ?? null,
+        room.code,
+        room.language
+      );
+      return NextResponse.json({ hint, source: "offline-coach" }, { status: 200 });
     }
 
     const answer = await chatCompletion(

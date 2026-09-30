@@ -318,6 +318,7 @@ export function RoomWorkspace({
   }
 
   const fileName = `${problem ? problem.slug : "main"}.${LANG_EXT[language] ?? "txt"}`;
+  const languageGradable = language === "javascript" || language === "python";
 
   if (status === "error") {
     return (
@@ -378,8 +379,8 @@ export function RoomWorkspace({
           <button
             type="button"
             onClick={() => execute("run")}
-            disabled={execBusy || !problem}
-            title={problem ? "Run sample tests" : "No problem selected"}
+            disabled={execBusy || !problem || !languageGradable}
+            title={!problem ? "No problem selected" : !languageGradable ? "Grading supports JavaScript & Python — switch language to grade" : "Run sample tests"}
             className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-semibold text-slate-200 transition hover:bg-white/10 disabled:opacity-50"
           >
             {execBusy ? "…" : "▶ Run"}
@@ -387,9 +388,9 @@ export function RoomWorkspace({
           <button
             type="button"
             onClick={() => execute("submit")}
-            disabled={execBusy || !problem}
-            title={problem ? "Grade against all tests" : "No problem selected"}
-            className="rounded-xl bg-indigo-600 px-3 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-indigo-500 disabled:opacity-50"
+            disabled={execBusy || !problem || !languageGradable}
+            title={!problem ? "No problem selected" : !languageGradable ? "Grading supports JavaScript & Python — switch language to grade" : "Grade against all tests"}
+          	className="rounded-xl bg-indigo-600 px-3 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-indigo-500 disabled:opacity-50"
           >
             Submit
           </button>
