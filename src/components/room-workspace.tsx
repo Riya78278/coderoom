@@ -396,11 +396,6 @@ export function RoomWorkspace({
         </div>
       </header>
 
-      <OutputPanel
-        state={execState}
-        onClose={() => setExecState({ kind: "idle" })}
-      />
-
       {/* ---------- Interview controls (host) ---------- */}
       <InterviewPanel
         roomId={room.id}
@@ -467,6 +462,13 @@ export function RoomWorkspace({
           />
         </aside>
       </div>
+
+      {/* Results render at the BOTTOM so appearing results never shift the
+          editor down (CLS). The panels row above shrinks instead. */}
+      <OutputPanel
+        state={execState}
+        onClose={() => setExecState({ kind: "idle" })}
+      />
 
       <p className="border-t border-white/10 bg-navy-950 px-4 py-1.5 text-center text-[11px] text-slate-500 lg:hidden">
         Best on a wider screen — problem and chat panels appear on large viewports.
