@@ -70,8 +70,11 @@ git ls-files | grep -E "^\.env"
    - **Runtime:** Node
    - **Build Command:**
      ```
-     npm install && npx prisma generate && npx prisma migrate deploy && npm run build
+     npm install && npx prisma generate && (npx prisma migrate deploy || (sleep 20 && npx prisma migrate deploy)) && npm run build
      ```
+     (The retry handles Neon free-tier cold starts — the DB can sleep when
+     idle, and the first migrate attempt may hit a 10s lock timeout while
+     waking it. If a build still fails with P1002, just re-deploy.)
    - **Start Command:**
      ```
      npm start

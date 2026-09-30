@@ -65,14 +65,9 @@ const GENERIC: HintLadder = {
 export function offlineHintFor(
   problemSlug: string | null,
   code: string,
-  language: string
+  _language: string
 ): string {
   const ladder = (problemSlug && LADDERS[problemSlug]) || GENERIC;
-  const runnable = language === "javascript" || language === "python";
-
-  if (!runnable) {
-    return "Heads up: grading currently supports JavaScript and Python, so switch the language before testing. Meanwhile, outline your approach in comments — pseudocode first, then translate.";
-  }
 
   const trimmed = code.trim();
   const looksStarter =

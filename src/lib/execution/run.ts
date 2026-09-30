@@ -9,6 +9,7 @@ import { getBackend } from "./backends";
 import {
   buildProgram,
   functionNameFor,
+  stdinFor,
   RESULT_MARKER,
   ERROR_PREFIX,
 } from "./harness";
@@ -35,9 +36,24 @@ export type GradeResult = {
 
 const CASE_TIMEOUT_MS = 5000;
 const MAX_CASES = 12;
+const COMPILE_MARKERS = [
+  "error:",
+  "compilation failed",
+  "expected ",
+  "was not declared",
+  ".java:",
+  "redefinition",
+];
 
 function compare(actual: string, expected: string): boolean {
-  return actual.trim() === expected.trim();
+  // Whitespace-insensitive: Python's json.dumps prints [0, 1] where JS
+  // prints [0,1] — same answer, different spacing.
+  return actual.trim().replace(/\s+/g, "") === expected.trim().replace(/\s+/g, "");
+}
+
+function looksLikeCompileError(stderr: string): boolean {
+  const s = stderr.toLowerCase();
+  return COMPILE_MARKERS.some((m) => s.includes(m));
 }
 
 export async function gradeSubmission({
@@ -86,7 +102,7 @@ export async function gradeSubmission({
       continue;
     }
 
-    const program = buildProgram(language, fnName, code, testCase.input);
+    const program = buildProgram(language, fnName, code, testCase.input, problemSlug ?? undefined);
     if (!program) {
       stop = true;
       results.push({
@@ -102,10 +118,37 @@ export async function gradeSubmission({
     }
 
     const run = await backend.run(
-      { language, code: program, stdin: testCase.input },
+      { language, code: program, stdin: stdinFor(language, testCase.input) },
       CASE_TIMEOUT_MS
     );
     if (run.stderr) lastStderr = run.stderr;
+
+    // Compiled languages: surface compile failures clearly and stop early.
+    if (
+      (language === "cpp" || language === "java") &&
+      run.exitCode !== 0 &&
+      run.stdout.indexOf(RESULT_MARKER) === -1 &&
+      looksLikeCompileError(run.stderr)
+    ) {
+      return {
+        verdict: "COMPILE_ERROR",
+        passed: 0,
+        total: limited.length,
+        runtimeMs: Date.now() - started,
+        results: [
+          {
+            index: 0,
+            isSample: true,
+            passed: false,
+            input: "",
+            expected: "",
+            actual: "",
+            error: "COMPILE_ERROR",
+          },
+        ],
+        stderr: run.stderr.slice(0, 2000),
+      };
+    }
 
     const markerIdx = run.stdout.indexOf(RESULT_MARKER);
     let actual = "";
@@ -158,7 +201,9 @@ export async function gradeSubmission({
       ? "TLE"
       : firstError?.error?.startsWith("RUNTIME_ERROR")
         ? "RUNTIME_ERROR"
-        : "WRONG_ANSWER";
+        : firstError?.error === "COMPILE_ERROR"
+          ? "COMPILE_ERROR"
+          : "WRONG_ANSWER";
 
   return {
     verdict,
