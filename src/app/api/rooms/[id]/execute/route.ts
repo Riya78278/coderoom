@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { getSessionUser } from "@/lib/session";
 import { gradeSubmission } from "@/lib/execution/run";
 import { emitToRoom } from "@/lib/realtime-emit";
+import { recordCodeEvent } from "@/lib/replay/record";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -111,6 +112,14 @@ export async function POST(request: Request, { params }: RouteContext) {
       // (server.mjs exposes it as a global — no HTTP hop, no secrets).
       // Fallback: the internal HTTP bridge in server.mjs. Failures are
       // logged, never silently swallowed.
+      // Timeline record (Phase 9) + live broadcast.
+      recordCodeEvent(room.id, "submission", user.id, {
+        verdict: grade.verdict,
+        passed: grade.passed,
+        total: grade.total,
+        name: user.name,
+        mode,
+      });
       const broadcastPayload = {
         submissionId: submission.id,
         userId: user.id,

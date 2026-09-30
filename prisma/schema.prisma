@@ -27,6 +27,8 @@ model User {
   interviewsGiven Interview[]    @relation("Interviewer")
   interviewsTaken Interview[]    @relation("Candidate")
   codeSnapshots   CodeSnapshot[]
+  codeEvents      CodeEvent[]
+  notifications   Notification[]
 
   @@map("users")
 }
@@ -78,6 +80,7 @@ model Room {
   messages    Message[]
   interviews  Interview[]
   submissions Submission[]
+  codeEvents  CodeEvent[]
   createdAt   DateTime       @default(now())
   updatedAt   DateTime       @updatedAt
   endedAt     DateTime?
@@ -195,6 +198,7 @@ model Interview {
   endedAt       DateTime?
   rating        Int? // candidate self/host rating 1–5
   feedback      String?
+  aiFeedback    String? // Phase 8: generated post-session review
   createdAt     DateTime        @default(now())
   updatedAt     DateTime        @updatedAt
   snapshots     CodeSnapshot[]
@@ -216,4 +220,41 @@ model CodeSnapshot {
 
   @@index([interviewId, takenAt])
   @@map("code_snapshots")
+}
+
+// ---------- Phase 10: Notifications ----------
+
+model Notification {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      String // JOIN | CHAT | INTERVIEW | PROBLEM
+  title     String
+  body      String?
+  roomId    String?
+  actorName String?
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId, createdAt])
+  @@index([userId, readAt])
+  @@map("notifications")
+}
+
+// ---------- Phase 9: Code replay ----------
+
+// Append-only timeline of a room's life. Replay = fold events left to right.
+// Types: code | language | chat | submission | interview | problem
+model CodeEvent {
+  id        String   @id @default(cuid())
+  roomId    String
+  room      Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  type      String
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  payload   Json
+  createdAt DateTime @default(now())
+
+  @@index([roomId, createdAt])
+  @@map("code_events")
 }

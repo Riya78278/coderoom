@@ -2,7 +2,7 @@
 
 > A real-time collaborative coding platform where two or more people join the same room, solve a problem together, chat, and see each other's code and cursors change live — built for mock interviews and pair programming.
 
-**Status: ✅ Phases 1–7 complete — deployed live and verified (24/24 tests against production). Next: Phase 9 (code replay, mandatory).**
+**Status: ✅ ALL PHASES COMPLETE (1–11) — deployed live and verified. 121 automated tests green across 7 suites.**
 
 **Scope: 12 phases — 10 mandatory for the complete product (0–7, 9, 11), 2 optional (8: AI interviewer, 10: notifications).**
 
@@ -267,6 +267,38 @@ Each phase ends with something demoable. Checkboxes track progress.
 6. Security: auth required, membership checked; no execution in COMPLETED rooms.
 
 **Done when:** Run shows sample-test output, Submit grades hidden tests, and results persist and display for all participants. *(Verified by `node scripts/test-phase6.mjs`: 24/24 — guest/non-member rejection, run-uses-3-samples-only, submit grades all 5 and persists, correct solution ACCEPTED, wrong answer on hidden case with inputs masked, runtime error surfaced, infinite loop → TLE, newest-first history, and live `submission:result` received by a second room member.)*
+
+### ✅ Phase 8 — AI Interviewer *(optional — built, off until `OPENAI_API_KEY` is set)*
+**Implementation:**
+1. `POST /api/ai/hint` — an interview-coach nudge grounded in the room's problem + live code; system-prompt constrained to never write the full solution.
+2. `POST /api/ai/feedback/:interviewId` — post-session review (Approach / Code quality / Complexity / Communication) from the final code snapshot; saved to `Interview.aiFeedback` and shown on the interview detail page with a one-click "Generate AI review" button (interviewer only).
+3. ✨ Hint button in the room header. Graceful degradation: without `OPENAI_API_KEY` the routes return 503 with a clear message; auth/membership checks run *before* the availability check so configuration state never leaks to strangers.
+
+**Verified by `node scripts/test-phase8.mjs`: 11/11** (security on both routes, invalid-input rejection, 503-unconfigured state, feedback saved when configured).
+
+### ✅ Phase 9 — Code Replay *(mandatory — 16/16 tests)*
+**Implementation:**
+1. Append-only `CodeEvent` timeline per room: full-document code samples (server-throttled to 1 per 2s while typing), language switches, chat, submissions, interview milestones, problem assignments.
+2. `GET /api/rooms/:id/replay` — members-only, oldest-first, names resolved.
+3. Replay page (`/room/:id/replay`): folding player that collapses consecutive code samples into typing bursts, with play/pause, 1–8× speed, a scrubber, and code + chat/events side by side. Linked via a "▶ Watch replay" button on every finished interview.
+
+**Verified by `node scripts/test-phase9.mjs`: 16/16** (guest/non-member rejection, 2s throttle collapses bursts, every event type recorded with correct payloads, oldest-first ordering, names resolved).
+
+### ✅ Phase 10 — Notifications *(optional — 16/16 tests)*
+**Implementation:**
+1. `Notification` model (JOIN / CHAT / INTERVIEW / PROBLEM) with unread tracking.
+2. Triggers: member joins your room (new joins only), chat messages to members **not currently connected** (no spam), interview starts (candidate), problem assigned (all members).
+3. Live push over each user's personal socket channel (`user:<id>`, joined at connection time) + a dashboard bell with unread badge, mark-one/mark-all read, and click-through to the room.
+
+**Verified by `node scripts/test-phase10.mjs`: 16/16** (security, live JOIN push, offline CHAT delivery, PROBLEM + INTERVIEW delivery, unread counts, mark-one/all, validation).
+
+### ✅ Phase 11 — Redis Scale-Out *(mandatory — 8/8 tests)*
+**Implementation:**
+1. `@socket.io/redis-adapter` activates when `REDIS_URL` is set (single-node otherwise, zero-config for local dev): every room broadcast publishes through Redis so **all** instances deliver it.
+2. Presence moved to Redis with 60s TTL + heartbeats: every instance sees the same participants; dead instances' users fade out automatically; snapshots self-heal expired entries.
+3. Personal `user:<id>` channels work cross-instance too (notifications reach you on any instance).
+
+**Verified by `scripts/test-phase11.mjs`: 8/8** — boots two real server instances + Redis, then proves cross-instance presence (both directions), code sync, chat delivery, and presence cleanup on disconnect.
 
 ### ✅ Phase 7 — Deployment *(live — 24/24 tests passed against production)*
 **Goal:** one public URL to share.

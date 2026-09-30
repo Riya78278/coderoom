@@ -203,6 +203,11 @@ export function useRoomSocket(roomId: string) {
     socketRef.current?.emit("code-change", { code });
   }, []);
 
+  // Phase 9: replay timeline sampling (server throttles to one record per 2s).
+  const sendCodeRecordTick = useCallback((code: string, language: string) => {
+    socketRef.current?.emit("code-record-tick", { code, language });
+  }, []);
+
   const sendCursorChange = useCallback((line: number, ch: number) => {
     socketRef.current?.emit("cursor-change", { line, ch });
   }, []);
@@ -245,6 +250,7 @@ export function useRoomSocket(roomId: string) {
     submissionEvent,
     roomEvent,
     sendCodeChange,
+    sendCodeRecordTick,
     sendCursorChange,
     sendLanguageChange,
     sendTyping,

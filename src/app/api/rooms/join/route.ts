@@ -3,6 +3,7 @@ import { z } from "zod";
 import { db } from "@/lib/db";
 import { getSessionUser } from "@/lib/session";
 import { joinCodeSchema } from "@/lib/room-codes";
+import { notifyUsers } from "@/lib/notify";
 
 const joinSchema = z.object({ code: joinCodeSchema });
 
@@ -45,6 +46,20 @@ export async function POST(request: Request) {
       create: { roomId: room.id, userId: user.id, role: "MEMBER" },
       update: {},
     });
+
+    // Phase 10: tell the host someone joined (only on a genuinely new join).
+    if (member.role === "MEMBER") {
+      const wasNew = member.joinedAt.getTime() > Date.now() - 5000;
+      if (wasNew) {
+        await notifyUsers([room.hostId], {
+          type: "JOIN",
+          title: `${user.name} joined your room`,
+          body: room.name,
+          roomId: room.id,
+          actorName: user.name,
+        });
+      }
+    }
 
     return NextResponse.json({ room, role: member.role }, { status: 200 });
   } catch (error) {

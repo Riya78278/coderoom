@@ -3,6 +3,8 @@ import { z } from "zod";
 import { db } from "@/lib/db";
 import { getSessionUser } from "@/lib/session";
 import { emitToRoom } from "@/lib/realtime-emit";
+import { recordCodeEvent } from "@/lib/replay/record";
+import { notifyUsers } from "@/lib/notify";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -21,7 +23,7 @@ export async function PATCH(request: Request, { params }: RouteContext) {
 
     const room = await db.room.findUnique({
       where: { id },
-      select: { id: true, hostId: true, status: true, problemId: true },
+      select: { id: true, name: true, hostId: true, status: true, problemId: true },
     });
     if (!room || room.status !== "ACTIVE") {
       return NextResponse.json({ error: "Room not found." }, { status: 404 });
@@ -60,11 +62,30 @@ export async function PATCH(request: Request, { params }: RouteContext) {
       select: { id: true, problemId: true },
     });
 
-    // Live update: everyone in the room sees the new problem instantly.
+    // Live update + timeline record: everyone sees the new problem instantly.
     emitToRoom(id, "room:update", {
       kind: "problem-changed",
       problem,
       by: user.name,
+    });
+    recordCodeEvent(id, "problem", user.id, {
+      title: problem?.title ?? null,
+      by: user.name,
+    });
+
+    // Phase 10: notify everyone else in the room about the new problem.
+    const memberIds = (
+      await db.roomMember.findMany({
+        where: { roomId: id, userId: { not: user.id } },
+        select: { userId: true },
+      })
+    ).map((m) => m.userId);
+    void notifyUsers(memberIds, {
+      type: "PROBLEM",
+      title: problem ? `New problem: ${problem.title}` : "Problem cleared",
+      body: room.name,
+      roomId: id,
+      actorName: user.name,
     });
 
     return NextResponse.json({ room: updated, problem }, { status: 200 });

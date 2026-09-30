@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { DashboardShell } from "@/components/dashboard-shell";
+import { AiFeedbackButton } from "@/components/ai-feedback-button";
 import { getSessionPayload } from "@/lib/session";
 import { db } from "@/lib/db";
 
@@ -75,6 +76,15 @@ export default async function InterviewDetailPage({
           {interview.room.name}
         </h1>
 
+        {interview.endedAt && (
+          <Link
+            href={`/room/${interview.roomId}/replay`}
+            className="mt-3 inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-500"
+          >
+            ▶ Watch replay
+          </Link>
+        )}
+
         {/* Summary strip */}
         <div className="mt-4 grid gap-3 sm:grid-cols-4">
           <div className="card p-4">
@@ -144,6 +154,23 @@ export default async function InterviewDetailPage({
               </p>
             </div>
           </section>
+        )}
+
+        {/* AI review (Phase 8) */}
+        {interview.aiFeedback && (
+          <section className="mt-8">
+            <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
+              AI review ✨
+            </h2>
+            <div className="card mt-2 border-indigo-200 bg-indigo-50/50 p-5">
+              <p className="whitespace-pre-wrap text-sm leading-relaxed text-slate-700">
+                {interview.aiFeedback}
+              </p>
+            </div>
+          </section>
+        )}
+        {interview.endedAt && interview.interviewerId === session.id && !interview.aiFeedback && (
+          <AiFeedbackButton interviewId={interview.id} />
         )}
 
         {/* Code snapshots */}

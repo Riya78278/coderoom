@@ -77,6 +77,17 @@ const nextApp = next({ dev });
 const handle = nextApp.getRequestHandler();
 await nextApp.prepare();
 
+/* ---------------------------------------------------------------------- */
+/* Phase 9: replay timeline recorder (best-effort, never throws)          */
+/* ---------------------------------------------------------------------- */
+function recordCodeEvent(roomId, type, userId, payload) {
+  db.codeEvent
+    .create({ data: { roomId, type, userId, payload } })
+    .catch((error) =>
+      console.error("[replay] record failed:", error?.message ?? error)
+    );
+}
+
 const httpServer = createServer((req, res) => {
   // Internal broadcast bridge (Phase 6): route handlers POST here so their
   // results reach every socket in a room. Guarded by a shared secret.
@@ -124,6 +135,34 @@ const io = new SocketIOServer(httpServer, {
 // fallback. One process hosts both, so the global is always the same io.
 globalThis.__coderoomIO = io;
 
+/* ---------------------------------------------------------------------- */
+/* Phase 11: Redis scale-out                                              */
+/* When REDIS_URL is set, every broadcast/room publish goes through Redis  */
+/* so multiple server instances stay in sync — the fix for "Riya on        */
+/* Server 1, Rahul on Server 2". Without REDIS_URL we run single-node     */
+/* (local dev, default Render deploy) and skip the adapter entirely.      */
+/* ---------------------------------------------------------------------- */
+const redisUrl = process.env.REDIS_URL;
+if (redisUrl) {
+  try {
+    const [{ createAdapter }, { Redis }] = await Promise.all([
+      import("@socket.io/redis-adapter"),
+      import("ioredis"),
+    ]);
+    const pubClient = new Redis(redisUrl, {
+      maxRetriesPerRequest: 1,
+      lazyConnect: true, // ioredis auto-connects by default; connect() below would throw
+    });
+    const subClient = pubClient.duplicate();
+    await Promise.all([pubClient.connect(), subClient.connect()]);
+    io.adapter(createAdapter(pubClient, subClient));
+    globalThis.__coderoomRedis = { pubClient, subClient }; // for graceful shutdown
+    console.log("> Redis adapter attached — multi-instance mode enabled");
+  } catch (error) {
+    console.error("> Redis adapter failed to initialize (continuing single-node):", error?.message ?? error);
+  }
+}
+
 // Shared secret for the internal broadcast bridge (route handlers → sockets).
 // Dev gets a known default so local runs work out of the box; production
 // must set INTERNAL_BROADCAST_SECRET explicitly.
@@ -132,10 +171,47 @@ const INTERNAL_SECRET =
 
 /* ---------------------------------------------------------------------- */
 /* Presence tracking                                                      */
+/* Memory mode (default) or Redis mode (REDIS_URL set, Phase 11).         */
+/* Redis mode: presence lives in per-user keys with a 60s TTL refreshed   */
+/* by heartbeats, so every instance sees the same participants and dead   */
+/* instances' users fade out automatically.                               */
 /* ---------------------------------------------------------------------- */
 
 /** socket.id → meta. One user may hold several sockets (multi-tab). */
 const socketsMeta = new Map();
+
+const PRESENCE_TTL_S = 60;
+const presenceRedis = globalThis.__coderoomRedis ?? null;
+const presenceKey = (roomId, userId) => `coderoom:presence:${roomId}:${userId}`;
+const roomSetKey = (roomId) => `coderoom:room:${roomId}:users`;
+
+function hasLocalSockets(roomId, userId) {
+  for (const meta of socketsMeta.values()) {
+    if (meta.roomId === roomId && meta.userId === userId) return true;
+  }
+  return false;
+}
+
+async function storePresence(roomId, userId, value) {
+  if (!presenceRedis) return;
+  const client = presenceRedis.pubClient;
+  await client
+    .multi()
+    .setex(presenceKey(roomId, userId), PRESENCE_TTL_S, JSON.stringify(value))
+    .sadd(roomSetKey(roomId), userId)
+    .exec();
+}
+
+async function removePresence(roomId, userId) {
+  if (!presenceRedis) return;
+  const client = presenceRedis.pubClient;
+  await client.multi().del(presenceKey(roomId, userId)).srem(roomSetKey(roomId), userId).exec();
+}
+
+async function refreshPresenceTTL(roomId, userId) {
+  if (!presenceRedis) return;
+  await presenceRedis.pubClient.expire(presenceKey(roomId, userId), PRESENCE_TTL_S);
+}
 
 const CURSOR_COLORS = [
   "#818cf8", "#34d399", "#fbbf24", "#f87171",
@@ -158,7 +234,24 @@ function nextSid() {
 }
 
 /** Presence snapshot of a room, de-duped by user (multi-tab safe). */
-function roomPresenceSnapshot(roomId) {
+async function roomPresenceSnapshot(roomId) {
+  if (presenceRedis) {
+    const client = presenceRedis.pubClient;
+    const userIds = await client.smembers(roomSetKey(roomId));
+    if (userIds.length === 0) return [];
+    const raw = await client.mget(...userIds.map((id) => presenceKey(roomId, id)));
+    const out = [];
+    for (let i = 0; i < raw.length; i++) {
+      if (!raw[i]) {
+        // TTL expired (dead socket/instance) — self-heal the room set.
+        void client.srem(roomSetKey(roomId), userIds[i]);
+        continue;
+      }
+      out.push(JSON.parse(raw[i]));
+    }
+    return out;
+  }
+
   const byUser = new Map();
   for (const meta of socketsMeta.values()) {
     if (meta.roomId !== roomId) continue;
@@ -179,8 +272,32 @@ function roomPresenceSnapshot(roomId) {
   return [...byUser.values()];
 }
 
-function emitPresence(roomId) {
-  io.to(roomId).emit("presence:update", roomPresenceSnapshot(roomId));
+async function emitPresence(roomId) {
+  try {
+    io.to(roomId).emit("presence:update", await roomPresenceSnapshot(roomId));
+  } catch (error) {
+    console.error("[socket] presence emit failed:", error?.message ?? error);
+  }
+}
+
+/* --- Presence heartbeats (Redis mode): keep TTLs alive while connected --- */
+const heartbeats = new Map(); // socketId → interval
+const HEARTBEAT_MS = 30_000;
+
+function startHeartbeat(socketId, roomId, userId) {
+  if (!presenceRedis || heartbeats.has(socketId)) return;
+  const t = setInterval(() => {
+    void refreshPresenceTTL(roomId, userId).catch(() => undefined);
+  }, HEARTBEAT_MS);
+  heartbeats.set(socketId, t);
+}
+
+function stopHeartbeat(socketId) {
+  const t = heartbeats.get(socketId);
+  if (t) {
+    clearInterval(t);
+    heartbeats.delete(socketId);
+  }
 }
 
 /* ---------------------------------------------------------------------- */
@@ -210,7 +327,7 @@ async function buildRoomStatePayload(roomId) {
   return {
     room,
     messages: messages.reverse(),
-    presence: roomPresenceSnapshot(roomId),
+    presence: await roomPresenceSnapshot(roomId),
   };
 }
 
@@ -273,6 +390,13 @@ function shutdown(code) {
   void flushAllCode()
     .catch(() => undefined)
     .finally(() => {
+      const redis = globalThis.__coderoomRedis;
+      if (redis) {
+        try {
+          redis.pubClient.disconnect();
+          redis.subClient.disconnect();
+        } catch {}
+      }
       void db.$disconnect();
       process.exit(code);
     });
@@ -309,6 +433,26 @@ const CUID_RE = /^c[a-z0-9]{20,}$/i;
 
 io.on("connection", (socket) => {
   let meta = null; // SocketMeta — set by join-room
+
+  // Phase 10: personal notification channel — available from connection time
+  // (dashboard bell works even before/without joining a room). The token is
+  // verified from cookie or handshake auth exactly like join-room does.
+  (async () => {
+    try {
+      const cookieToken = parseCookieValue(
+        socket.handshake.headers.cookie,
+        SESSION_COOKIE
+      );
+      const authToken =
+        typeof socket.handshake.auth?.token === "string"
+          ? socket.handshake.auth.token
+          : undefined;
+      const payload = await verifySessionToken(cookieToken ?? authToken);
+      if (payload?.id) {
+        socket.join(`user:${payload.id}`);
+      }
+    } catch {}
+  })();
 
   socket.on("join-room", async (raw, ack) => {
     try {
@@ -370,9 +514,13 @@ io.on("connection", (socket) => {
       // 4. Leave a previous room if this socket is switching rooms.
       if (meta?.roomId) {
         const prev = meta.roomId;
+        const prevUser = meta.userId;
         socket.leave(prev);
         socketsMeta.delete(socket.id);
-        emitPresence(prev);
+        if (!hasLocalSockets(prev, prevUser)) {
+          void removePresence(prev, prevUser);
+        }
+        void emitPresence(prev);
       }
 
       const sid = nextSid();
@@ -386,6 +534,17 @@ io.on("connection", (socket) => {
       };
       socketsMeta.set(socket.id, meta);
       socket.join(room.id);
+      // Per-user channel: notifications follow you across rooms/tabs.
+      socket.join(`user:${payload.id}`);
+
+      // Phase 11: publish presence cross-instance (no-op in memory mode).
+      await storePresence(room.id, meta.userId, {
+        userId: meta.userId,
+        name: meta.name,
+        color: meta.color,
+        cursor: null,
+      });
+      startHeartbeat(socket.id, room.id, meta.userId);
 
       const state = await buildRoomStatePayload(room.id);
       if (!state) {
@@ -398,7 +557,9 @@ io.on("connection", (socket) => {
         state,
         you: { sid, color: meta.color, role: membership.role, userId: payload.id },
       });
-      socket.to(room.id).emit("presence:update", roomPresenceSnapshot(room.id));
+      socket
+        .to(room.id)
+        .emit("presence:update", await roomPresenceSnapshot(room.id));
     } catch (error) {
       console.error("[socket] join-room failed:", error);
       ack?.({ ok: false, error: "Could not join the room." });
@@ -414,6 +575,23 @@ io.on("connection", (socket) => {
       code,
       from: meta.userId,
       name: meta.name,
+    });
+  });
+
+  // Phase 9: timeline recording — the full document at most every 2s while
+  // typing (bounded storage, smooth replay playback).
+  let lastCodeRecord = 0;
+  socket.on("code-record-tick", (raw) => {
+    if (!meta?.roomId) return;
+    if (typeof raw !== "object" || raw === null) return;
+    const { code, language } = raw;
+    if (typeof code !== "string" || code.length > 100_000) return;
+    const now = Date.now();
+    if (now - lastCodeRecord < 2000) return;
+    lastCodeRecord = now;
+    recordCodeEvent(meta.roomId, "code", meta.userId, {
+      code,
+      language: typeof language === "string" ? language : meta.language ?? null,
     });
   });
 
@@ -434,6 +612,15 @@ io.on("connection", (socket) => {
       return;
     }
     meta.cursor = { line, ch, sid: meta.sid };
+    // Keep the stored presence current so other instances see the cursor.
+    if (presenceRedis) {
+      void storePresence(meta.roomId, meta.userId, {
+        userId: meta.userId,
+        name: meta.name,
+        color: meta.color,
+        cursor: { ...meta.cursor },
+      });
+    }
     socket.to(meta.roomId).emit("cursor-change", {
       userId: meta.userId,
       name: meta.name,
@@ -466,6 +653,7 @@ io.on("connection", (socket) => {
       ack?.({ ok: false });
       return;
     }
+    recordCodeEvent(meta.roomId, "language", meta.userId, { language });
     // Align any buffered code flush so it doesn't resurrect the old language.
     const entry = pendingCodeFlush.get(meta.roomId);
     if (entry) entry.language = language;
@@ -502,6 +690,42 @@ io.on("connection", (socket) => {
       };
       io.to(meta.roomId).emit("chat:message", payload);
       ack?.({ ok: true, message: payload });
+      recordCodeEvent(meta.roomId, "chat", meta.userId, {
+        content,
+        name: meta.name,
+      });
+      // Phase 10: notify room members who are NOT currently connected.
+      try {
+        const members = await db.roomMember.findMany({
+          where: { roomId: meta.roomId },
+          select: { userId: true },
+        });
+        const online = new Set();
+        for (const m of socketsMeta.values()) {
+          if (m.roomId === meta.roomId) online.add(m.userId);
+        }
+        const offline = members
+          .map((m) => m.userId)
+          .filter((id) => !online.has(id) && id !== meta.userId);
+        if (offline.length > 0) {
+          const room = { name: null };
+          const roomRow = await db.room.findUnique({
+            where: { id: meta.roomId },
+            select: { name: true },
+          });
+          room.name = roomRow?.name ?? null;
+          const { notifyUsers } = await import("./server/notify-bridge.mjs");
+          await notifyUsers(offline, {
+            type: "CHAT",
+            title: `${meta.name}: ${content.slice(0, 60)}`,
+            body: room.name,
+            roomId: meta.roomId,
+            actorName: meta.name,
+          });
+        }
+      } catch (error) {
+        console.error("[socket] chat notify failed:", error?.message ?? error);
+      }
     } catch (error) {
       console.error("[socket] chat save failed:", error);
       ack?.({ ok: false });
@@ -532,22 +756,36 @@ io.on("connection", (socket) => {
       by: meta.userId,
       name: meta.name,
     });
+    recordCodeEvent(meta.roomId, "interview", meta.userId, {
+      action,
+      name: meta.name,
+    });
   });
 
   socket.on("leave-room", () => {
     if (!meta?.roomId) return;
     const roomId = meta.roomId;
+    const userId = meta.userId;
     socket.leave(roomId);
     socketsMeta.delete(socket.id);
+    stopHeartbeat(socket.id);
+    if (!hasLocalSockets(roomId, userId)) {
+      void removePresence(roomId, userId);
+    }
     meta = null;
-    emitPresence(roomId);
+    void emitPresence(roomId);
   });
 
   socket.on("disconnect", () => {
     if (!meta?.roomId) return;
     const roomId = meta.roomId;
+    const userId = meta.userId;
     socketsMeta.delete(socket.id);
-    emitPresence(roomId);
+    stopHeartbeat(socket.id);
+    if (!hasLocalSockets(roomId, userId)) {
+      void removePresence(roomId, userId);
+    }
+    void emitPresence(roomId);
   });
 });
 

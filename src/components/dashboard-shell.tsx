@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
 import { Logo } from "@/components/logo";
+import { NotificationBell } from "@/components/notification-bell";
 
 type NavItem = {
   label: string;
@@ -92,8 +93,9 @@ export function DashboardShell({
     <div className="flex min-h-screen bg-slate-50">
       {/* ---------- Sidebar ---------- */}
       <aside className="sticky top-0 hidden h-screen w-64 shrink-0 flex-col bg-navy-900 p-4 text-white lg:flex">
-        <div className="px-2 py-3">
+        <div className="flex items-center justify-between px-2 py-3">
           <Logo dark href="/dashboard" />
+          <NotificationBell />
         </div>
 
         <nav className="mt-6 flex flex-1 flex-col gap-1">          {NAV.map((item) => {
@@ -156,9 +158,12 @@ export function DashboardShell({
         {/* mobile topbar */}
         <div className="flex items-center justify-between border-b border-slate-200 bg-white px-4 py-3 lg:hidden">
           <Logo href="/dashboard" />
-          <button onClick={logout} className="btn-secondary px-3 py-1.5 text-xs">
-            Log out
-          </button>
+          <div className="flex items-center gap-2">
+            <NotificationBell />
+            <button onClick={logout} className="btn-secondary px-3 py-1.5 text-xs">
+              Log out
+            </button>
+          </div>
         </div>
         <main className="flex-1">{children}</main>
       </div>

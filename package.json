@@ -13,7 +13,11 @@
     "db:seed:tests": "node prisma/seed-testcases.mjs",
     "test:phase4": "node scripts/test-phase4.mjs",
     "test:phase5": "node scripts/test-phase5.mjs",
-    "test:phase6": "node scripts/test-phase6.mjs"
+    "test:phase6": "node scripts/test-phase6.mjs",
+    "test:phase8": "node scripts/test-phase8.mjs",
+    "test:phase9": "node scripts/test-phase9.mjs",
+    "test:phase10": "node scripts/test-phase10.mjs",
+    "test:phase11": "node scripts/test-phase11.mjs"
   },
   "prisma": {
     "seed": "node prisma/seed.mjs"
@@ -21,7 +25,9 @@
   "dependencies": {
     "@monaco-editor/react": "^4.7.0",
     "@prisma/client": "^6.16.2",
+    "@socket.io/redis-adapter": "^8.3.0",
     "bcryptjs": "^3.0.2",
+    "ioredis": "^6.0.0",
     "jose": "^6.1.0",
     "nanoid": "^5.1.16",
     "next": "16.3.4",

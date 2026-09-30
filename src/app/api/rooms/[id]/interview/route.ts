@@ -2,6 +2,9 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { getSessionUser } from "@/lib/session";
+import { emitToRoom } from "@/lib/realtime-emit";
+import { recordCodeEvent } from "@/lib/replay/record";
+import { notifyUsers } from "@/lib/notify";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -34,6 +37,7 @@ export async function POST(request: Request, { params }: RouteContext) {
       where: { id },
       select: {
         id: true,
+        name: true,
         hostId: true,
         status: true,
         problemId: true,
@@ -83,6 +87,22 @@ export async function POST(request: Request, { params }: RouteContext) {
         candidateId,
         problemId: room.problemId,
       },
+    });
+
+    // Server-authoritative live relay + timeline record (Phase 9).
+    emitToRoom(id, "interview:update", {
+      action: "started",
+      interviewId: interview.id,
+      by: user.id,
+      name: user.name,
+    });
+    recordCodeEvent(id, "interview", user.id, { action: "started", name: user.name });
+    void notifyUsers([candidateId], {
+      type: "INTERVIEW",
+      title: "Your interview session started",
+      body: room.name,
+      roomId: id,
+      actorName: user.name,
     });
 
     return NextResponse.json({ interview }, { status: 201 });
@@ -162,6 +182,14 @@ export async function PATCH(request: Request, { params }: RouteContext) {
         data: { status: "COMPLETED", endedAt: new Date() },
       }),
     ]);
+
+    emitToRoom(id, "interview:update", {
+      action: "ended",
+      interviewId: interview.id,
+      by: user.id,
+      name: user.name,
+    });
+    recordCodeEvent(id, "interview", user.id, { action: "ended", name: user.name });
 
     return NextResponse.json({ interview: completed }, { status: 200 });
   } catch (error) {

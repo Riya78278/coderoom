@@ -8,6 +8,7 @@ import { ProblemPicker } from "@/components/problem-picker";
 import { ChatPanel } from "@/components/chat-panel";
 import { PresenceBar } from "@/components/presence-bar";
 import { CopyJoinCode } from "@/components/copy-join-code";
+import { AiHint } from "@/components/ai-hint";
 import {
   InterviewPanel,
   type ActiveInterview,
@@ -102,6 +103,7 @@ export function RoomWorkspace({
     submissionEvent,
     roomEvent,
     sendCodeChange,
+    sendCodeRecordTick,
     sendCursorChange,
     sendLanguageChange,
     sendTyping,
@@ -164,9 +166,10 @@ export function RoomWorkspace({
       if (applyingRemoteRef.current) return;
       setCode(v);
       sendCodeChange(v);
+      sendCodeRecordTick(v, language);
       setSaveState("dirty");
     },
-    [sendCodeChange]
+    [sendCodeChange, sendCodeRecordTick, language]
   );
 
   // Cursor broadcast (throttled).
@@ -371,6 +374,7 @@ export function RoomWorkspace({
               </option>
             ))}
           </select>
+          <AiHint roomId={room.id} />
           <button
             type="button"
             onClick={() => execute("run")}
